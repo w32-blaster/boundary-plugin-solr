@@ -22,8 +22,9 @@ PLUGIN_RETRY_DELAY = 5
 """
 We have multiple endpoints for retriving the different status
 """
-SYSTEM_ENDPOINT='info/system?wt=json'
-THREAD_ENDPOINT='info/threads?wt=json'
+SYSTEM_ENDPOINT='admin/info/system?wt=json'
+THREAD_ENDPOINT='admin/info/threads?wt=json'
+MBEANS_ENDPOINT='admin/mbeans?stats=true&wt=json&json.nl=map'
 
 SYSTEM_KEY_MAPPING = (
     (["mode"], "SOLR_RUN_MODE", False),
@@ -47,18 +48,33 @@ THREAD_KEY_MAPPING = (
     (["system", "threadCount", "daemon"], "SOLR_THREAD_DAEMON", False)
 )
 
+MBEANS_KEY_MAPPING = (
+    (["solr-mbeans", "CACHE", "documentCache", "stats", "lookups"], "SOLR_CACHE_DOCUMENT_LOOKUPS", False),
+    (["solr-mbeans", "CACHE", "documentCache", "stats", "hits"], "SOLR_CACHE_DOCUMENT_HITS", False),
+    (["solr-mbeans", "CACHE", "documentCache", "stats", "hitratio"], "SOLR_CACHE_DOCUMENT_HITRATIO", False),
+    (["solr-mbeans", "CACHE", "documentCache", "stats", "inserts"], "SOLR_CACHE_DOCUMENT_INSERTS", False),
+    (["solr-mbeans", "CACHE", "documentCache", "stats", "size"], "SOLR_CACHE_DOCUMENT_SIZE", False),
+    (["solr-mbeans", "CACHE", "documentCache", "stats", "evictions"], "SOLR_CACHE_DOCUMENT_EVICTIONS", False),
+    (["solr-mbeans", "CACHE", "documentCache", "stats", "warmupTime"], "SOLR_CACHE_DOCUMENT_WARMUPTIME", False),
+)
+
 class SolrPlugin(object):
     def __init__(self, boundary_metric_prefix):
         self.boundary_metric_prefix = boundary_metric_prefix
         self.settings = boundary_plugin.parse_params()
         self.accumulator = boundary_accumulator
-	self.base_url = self.settings.get("base_url", "http://localhost:8983/solr/admin/")
+	self.base_url = self.settings.get("base_url", "http://localhost:8983/solr/")
 
     def get_stats(self):
+	mbeans_endpoint_with_collection = MBEANS_ENDPOINT
 	system = self.get_raw_data(SYSTEM_ENDPOINT)
 	threads = self.get_raw_data(THREAD_ENDPOINT)
-
-	return {'system': system, 'threads': threads}
+	
+	if self.collection:
+	  mbeans_endpoint_with_collection = self.collection + '/' + MBEANS_ENDPOINT
+	mbeans = self.get_raw_data(mbeans_endpoint_with_collection)
+	
+	return {'system': system, 'threads': threads, 'mbeans': mbeans}
 
     def get_raw_data(self, endpoint):
 	req = urllib2.urlopen(urlparse.urljoin(self.base_url, endpoint))
@@ -117,15 +133,36 @@ class SolrPlugin(object):
 
             boundary_plugin.boundary_report_metric(self.boundary_metric_prefix + boundary_name, value)
 
+    def handle_metric_for_caches(self, data):
+        for metric_path, boundary_name, accumulate in MBEANS_KEY_MAPPING:
+            value = data
+            try:
+                for p in metric_path:
+                    value = value[p]
+            except KeyError:
+                value = None
+
+            if not value:
+                continue
+
+            if accumulate:
+                value = self.accumulator.accumulate(metric_path, value)
+
+            boundary_plugin.boundary_report_metric(self.boundary_metric_prefix + boundary_name, value)
+
     def handle_metrics(self, data):
 	self.handle_metric_for_system(data['system'])
 	self.handle_metric_for_threads(data['threads'])
+	self.handle_metric_for_caches(data['mbeans'])
 
     def main(self):
         logging.basicConfig(level=logging.ERROR, filename=self.settings.get('log_file', None))
         reports_log = self.settings.get('report_log_file', None)
         if reports_log:
             boundary_plugin.log_metrics_to_file(reports_log)
+
+	self.collection = self.settings.get('collection_name', None)
+
         boundary_plugin.start_keepalive_subprocess()
 
         while True:
