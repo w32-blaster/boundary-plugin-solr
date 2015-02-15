@@ -66,13 +66,13 @@ class SolrPlugin(object):
 	self.base_url = self.settings.get("base_url", "http://localhost:8983/solr/")
 
     def get_stats(self):
-	mbeans_endpoint_with_collection = MBEANS_ENDPOINT
+	mbeans_endpoint_with_core = MBEANS_ENDPOINT
 	system = self.get_raw_data(SYSTEM_ENDPOINT)
 	threads = self.get_raw_data(THREAD_ENDPOINT)
 	
-	if self.collection:
-	  mbeans_endpoint_with_collection = self.collection + '/' + MBEANS_ENDPOINT
-	mbeans = self.get_raw_data(mbeans_endpoint_with_collection)
+	if self.core:
+	  mbeans_endpoint_with_core = self.core + '/' + MBEANS_ENDPOINT
+	mbeans = self.get_raw_data(mbeans_endpoint_with_core)
 	
 	return {'system': system, 'threads': threads, 'mbeans': mbeans}
 
@@ -161,7 +161,7 @@ class SolrPlugin(object):
         if reports_log:
             boundary_plugin.log_metrics_to_file(reports_log)
 
-	self.collection = self.settings.get('collection_name', None)
+	self.core = self.settings.get('core_name', None)
 
         boundary_plugin.start_keepalive_subprocess()
 
